@@ -4,11 +4,14 @@ import io.restassured.RestAssured
 import mobi.sevenwinds.common.ServerTest
 import mobi.sevenwinds.common.jsonBody
 import mobi.sevenwinds.common.toResponse
+import org.assertj.core.internal.bytebuddy.utility.RandomString
 import org.jetbrains.exposed.sql.deleteAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.Assert
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.RepeatedTest
 import org.junit.jupiter.api.Test
+import org.junit.runners.Parameterized.Parameters
 
 class BudgetApiKtTest : ServerTest() {
 
@@ -19,12 +22,12 @@ class BudgetApiKtTest : ServerTest() {
 
     @Test
     fun testBudgetPagination() {
-        addRecord(BudgetRecord(2020, 5, 10, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 5, 5, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 5, 20, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 5, 30, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 5, 40, BudgetType.Приход))
-        addRecord(BudgetRecord(2030, 1, 1, BudgetType.Расход))
+        addRecord(BudgetRecordRequest(2020, 5, 10, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 5, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 20, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 30, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 40, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2030, 1, 1, BudgetType.Расход))
 
         RestAssured.given()
             .queryParam("limit", 3)
@@ -41,11 +44,11 @@ class BudgetApiKtTest : ServerTest() {
 
     @Test
     fun testStatsSortOrder() {
-        addRecord(BudgetRecord(2020, 5, 100, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 1, 5, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 5, 50, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 1, 30, BudgetType.Приход))
-        addRecord(BudgetRecord(2020, 5, 400, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 100, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 1, 5, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 50, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 1, 30, BudgetType.Приход))
+        addRecord(BudgetRecordRequest(2020, 5, 400, BudgetType.Приход))
 
         // expected sort order - month ascending, amount descending
 
@@ -65,22 +68,72 @@ class BudgetApiKtTest : ServerTest() {
     @Test
     fun testInvalidMonthValues() {
         RestAssured.given()
-            .jsonBody(BudgetRecord(2020, -5, 5, BudgetType.Приход))
+            .jsonBody(BudgetRecordRequest(2020, -5, 5, BudgetType.Приход))
             .post("/budget/add")
             .then().statusCode(400)
 
         RestAssured.given()
-            .jsonBody(BudgetRecord(2020, 15, 5, BudgetType.Приход))
+            .jsonBody(BudgetRecordRequest(2020, 15, 5, BudgetType.Приход))
             .post("/budget/add")
             .then().statusCode(400)
     }
 
-    private fun addRecord(record: BudgetRecord) {
+    @RepeatedTest(5)
+    fun testGetBudgetWithAuthorName(){
+        val firstName = RandomString.make(4);
+        val lastName = RandomString.make(6);
+        val middleName = RandomString.make(3)
+        val fullName = "$lastName $firstName $middleName"
+
+        val authorId = addAuthor(fullName)
+
+        println(authorId)
+
+        addRecord(BudgetRecordRequest(2020, 5, 100, BudgetType.Приход, authorId))
+
+        RestAssured.given().queryParam("limit", 100).queryParams("offset", 0).queryParam("name", firstName.toUpperCase())
+            .get("/budget/year/2020/stats")
+            .toResponse<BudgetYearStatsResponse>().let{ response ->
+                Assert.assertEquals(response.items[0].fullName, fullName)
+            }
+
+        RestAssured.given().queryParam("limit", 100).queryParams("offset", 0).queryParam("name", lastName.substring(2,6).toLowerCase())
+            .get("/budget/year/2020/stats")
+            .toResponse<BudgetYearStatsResponse>().let{ response ->
+                Assert.assertEquals(response.items[0].fullName, fullName)
+            }
+
+        RestAssured.given().queryParam("limit", 100).queryParams("offset", 0).queryParam("name", "$lastName $firstName")
+            .get("/budget/year/2020/stats")
+            .toResponse<BudgetYearStatsResponse>().let{ response ->
+                Assert.assertEquals(response.items[0].fullName, fullName)
+            }
+
+        RestAssured.given().queryParam("limit", 100).queryParams("offset", 0).queryParam("name", "w3e12313123123213213j12j3ggashfgasf")
+            .get("/budget/year/2020/stats")
+            .toResponse<BudgetYearStatsResponse>().let{ response ->
+                Assert.assertEquals(response.total, 0)
+            }
+
+    }
+
+    private fun addRecord(record: BudgetRecordRequest) {
         RestAssured.given()
             .jsonBody(record)
             .post("/budget/add")
-            .toResponse<BudgetRecord>().let { response ->
-                Assert.assertEquals(record, response)
+            .toResponse<BudgetRecordResponse>().let { response ->
+                Assert.assertEquals(record.type, response.type)
+                Assert.assertEquals(record.year, response.year)
+                Assert.assertEquals(record.amount, response.amount)
+                Assert.assertEquals(record.month, response.month)
             }
+    }
+
+    private fun addAuthor(fullName: String) : Int{
+        return RestAssured
+            .given()
+            .jsonBody(fullName)
+            .post("/author/add")
+            .toResponse<Int>()
     }
 }

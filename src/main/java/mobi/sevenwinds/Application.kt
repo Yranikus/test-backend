@@ -1,9 +1,14 @@
 package mobi.sevenwinds
 
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.core.JsonGenerator
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.databind.*
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer
+import com.fasterxml.jackson.databind.module.SimpleModule
+import com.fasterxml.jackson.databind.ser.std.StdSerializer
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module
 import com.fasterxml.jackson.module.kotlin.MissingKotlinParameterException
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.papsign.ktor.openapigen.annotations.type.common.ConstraintViolation
 import com.papsign.ktor.openapigen.exceptions.OpenAPIRequiredFieldException
 import com.papsign.ktor.openapigen.route.apiRouting
@@ -21,8 +26,11 @@ import mobi.sevenwinds.modules.DatabaseFactory
 import mobi.sevenwinds.modules.initSwagger
 import mobi.sevenwinds.modules.serviceRouting
 import mobi.sevenwinds.modules.swaggerRouting
+import org.joda.time.DateTime
+import org.joda.time.format.DateTimeFormat
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
+
 
 fun main(args: Array<String>): Unit = EngineMain.main(args)
 
@@ -37,8 +45,13 @@ fun Application.module() {
     install(ContentNegotiation) {
         jackson {
             enable(SerializationFeature.INDENT_OUTPUT)
-            configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            configure(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES, false)
+            configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, false)
             registerModule(Jdk8Module())
+            registerKotlinModule()
+            registerModules( SimpleModule()
+                .addSerializer(DateTime::class.java, CustomDateTimeSerializer())
+                )
         }
     }
 
@@ -102,4 +115,25 @@ fun Application.module() {
             log.error("", cause)
         }
     }
+}
+
+class CustomDateTimeSerializer : StdSerializer<DateTime>(DateTime::class.java) {
+
+    override fun serialize(
+        value: DateTime,
+        gen: JsonGenerator,
+        arg2: SerializerProvider
+    ) {
+        gen.writeString(value.toString("dd:MM:yyyy HH:mm:ss"))
+    }
+}
+
+class CustomDateTimeDeserializer : StdDeserializer<DateTime>(DateTime::class.java) {
+
+    override fun deserialize(p0: JsonParser?, p1: DeserializationContext?): DateTime {
+
+        return DateTime.parse(p0?.text, DateTimeFormat.forPattern("dd:MM:yyyy HH:mm:ss"));
+    }
+
+
 }
